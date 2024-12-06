@@ -3,7 +3,7 @@ use tudouda;
 
 -- 用户表初始数据（密码是 12345678）
 INSERT INTO user (id, userAccount, userPassword, unionId, mpOpenId, userName, userAvatar, userProfile, userRole)
-VALUES (5, 'tudou', 'b0dd3697a192885d7c055db46155b26a', NULL, NULL, '程序员', 'https://www.code-nav.cn/logo.png',
+VALUES (5, 'tudou', 'b0dd3697a192885d7c055db46155b26a', NULL, NULL, '程序员', '',
         '系统管理员', 'admin');
 
 -- 题库表初始数据
