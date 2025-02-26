@@ -180,24 +180,22 @@ public class CounterManager {
     private void scheduleSyncToRedis(String redisKey, int count) {
         scheduler.scheduleAtFixedRate(() -> {
             try {
-                String luaScript =
-                        "if redis.call('exists', KEYS[1]) == 1 then " +
-                                "  redis.call('set', KEYS[1], ARGV[1]); " +
-                                "  redis.call('expire', KEYS[1], ARGV[2]); " +
-                                "  return ARGV[1]; " +
-                                "else " +
-                                "  redis.call('set', KEYS[1], ARGV[1]); " +
-                                "  redis.call('expire', KEYS[1], ARGV[2]); " +
-                                "  return ARGV[1]; " +
-                                "end";
-                RScript script = redissonClient.getScript(IntegerCodec.INSTANCE);
-                script.eval(
-                        RScript.Mode.READ_WRITE,
-                        luaScript,
-                        RScript.ReturnType.INTEGER,
-                        Collections.singletonList(redisKey),
-                        count, // ARGV[1]: 替换的计数值
-                        60     // ARGV[2]: 过期时间（秒）
+                   String luaScript =
+                       "if redis.call('exists', KEYS[1]) == 1 then " +
+                       "  redis.call('set', KEYS[1], ARGV[1]); " +  // Key 存在，只更新值
+                       "else " +
+                       "  redis.call('set', KEYS[1], ARGV[1], 'EX', ARGV[2]); " +  // Key 不存在，设置值和过期时间
+                       "end " +
+                       "return ARGV[1];";
+                   
+                   RScript script = redissonClient.getScript(IntegerCodec.INSTANCE);
+                   script.eval(
+                       RScript.Mode.READ_WRITE,
+                       luaScript,
+                       RScript.ReturnType.INTEGER,
+                       Collections.singletonList(redisKey),
+                       count,  // ARGV[1]: 替换的计数值
+                       60      // ARGV[2]: 过期时间（秒）
                 );
             } catch (Exception ex) {
                 log.error("Failed to sync local cache to Redis for key: {}", redisKey, ex);
