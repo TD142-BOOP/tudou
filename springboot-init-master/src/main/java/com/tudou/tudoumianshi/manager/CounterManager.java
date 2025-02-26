@@ -180,6 +180,14 @@ public class CounterManager {
     private void scheduleSyncToRedis(String redisKey, int count) {
         scheduler.scheduleAtFixedRate(() -> {
             try {
+
+
+                   // 尝试设置值和过期时间（仅在 Key 不存在时生效）
+                   //boolean isSet = redissonClient.getBucket(redisKey).trySet(count, 60, TimeUnit.SECONDS);
+                   //if (!isSet) {
+                       // Key 已存在，只更新值
+                       //redissonClient.getBucket(redisKey).set(count);
+                   //}
                    String luaScript =
                        "if redis.call('exists', KEYS[1]) == 1 then " +
                        "  redis.call('set', KEYS[1], ARGV[1]); " +  // Key 存在，只更新值
