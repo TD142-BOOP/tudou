@@ -4,6 +4,7 @@ import com.alibaba.csp.sentinel.annotation.SentinelResource;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RAtomicLong;
 import org.redisson.api.RScript;
 import org.redisson.api.RedissonClient;
 import org.redisson.client.codec.IntegerCodec;
@@ -140,7 +141,7 @@ public class CounterManager {
 //                RAtomicLong atomicLong = redissonClient.getAtomicLong(redisKey);
 //                if (atomicLong.isExists()) {
 //                    // 键已存在，仅增加计数
-//                    atomicLong.addAndGet(count);
+//                    atomicLong.set(count);
 //                } else {
 //                    // 键不存在，设置初始值并设置过期时间
 //                    atomicLong.set(count);
@@ -148,8 +149,7 @@ public class CounterManager {
 //                }
 //            }catch (Exception ex) {
 //                log.error("Failed to sync local cache to Redis for key: {}", redisKey, ex);
-//            }
-//            counterCache.invalidate(redisKey);
+//            }         
 //        }, 0, 15, TimeUnit.SECONDS);
 
         // 更新本地缓存中的计数
@@ -182,27 +182,25 @@ public class CounterManager {
             try {
                 String luaScript =
                         "if redis.call('exists', KEYS[1]) == 1 then " +
-                                "  return redis.call('incrby', KEYS[1], ARGV[1]); " +
+                                "  redis.call('set', KEYS[1], ARGV[1]); " +
+                                "  redis.call('expire', KEYS[1], ARGV[2]); " +
+                                "  return ARGV[1]; " +
                                 "else " +
                                 "  redis.call('set', KEYS[1], ARGV[1]); " +
                                 "  redis.call('expire', KEYS[1], ARGV[2]); " +
                                 "  return ARGV[1]; " +
                                 "end";
-
                 RScript script = redissonClient.getScript(IntegerCodec.INSTANCE);
                 script.eval(
                         RScript.Mode.READ_WRITE,
                         luaScript,
                         RScript.ReturnType.INTEGER,
                         Collections.singletonList(redisKey),
-                        count, // ARGV[1]: 增加的计数值
+                        count, // ARGV[1]: 替换的计数值
                         60     // ARGV[2]: 过期时间（秒）
                 );
             } catch (Exception ex) {
                 log.error("Failed to sync local cache to Redis for key: {}", redisKey, ex);
-            } finally {
-                // 清空当前键的本地缓存
-                counterCache.invalidate(redisKey);
             }
         }, 0,15,TimeUnit.SECONDS); // 立即执行
     }
