@@ -5,9 +5,11 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RAtomicLong;
+import org.redisson.api.RBucket;
 import org.redisson.api.RScript;
 import org.redisson.api.RedissonClient;
 import org.redisson.client.codec.IntegerCodec;
+import org.redisson.client.codec.LongCodec;
 import org.springframework.stereotype.Service;
 import javax.annotation.Resource;
 import java.time.Instant;
@@ -131,45 +133,9 @@ public class CounterManager {
 //
 
 
-//        counterCache.asMap().compute(redisKey, (k, v) -> {
-//            return v == null ? 1 : v + 1;
-//        });
-//        ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
-//        scheduler.scheduleAtFixedRate(() -> {
-//            Integer count = counterCache.asMap().get(redisKey);
-//            try {
-//                RAtomicLong atomicLong = redissonClient.getAtomicLong(redisKey);
-//                if (atomicLong.isExists()) {
-//                    // 键已存在，仅增加计数
-//                    atomicLong.set(count);
-//                } else {
-//                    // 键不存在，设置初始值并设置过期时间
-//                    atomicLong.set(count);
-//                    atomicLong.expire(1, TimeUnit.MINUTES);
-//                }
-//            }catch (Exception ex) {
-//                log.error("Failed to sync local cache to Redis for key: {}", redisKey, ex);
-//            }         
-//        }, 0, 15, TimeUnit.SECONDS);
 
         // 更新本地缓存中的计数
-        //int count = counterCache.asMap().compute(redisKey, (k, v) -> v == null ? 1 : v + 1);
-
-        // 使用 CompletableFuture 异步同步到 Redis
-        //CompletableFuture<Long> future = new CompletableFuture<>();
-
-        // 启动定时任务异步同步到 Redis
-//        scheduleSyncToRedis(redisKey, count, future);
-//
-//        try {
-//            // 阻塞等待异步任务完成，并返回 Redis 中的值
-//            return future.get(); // 阻塞直到任务完成
-//        } catch (InterruptedException | ExecutionException ex) {
-//            log.error("Failed to get result from Redis for key: {}", redisKey, ex);
-//            // 如果异步任务失败，返回本地缓存中的值作为降级处理
-//            return count;
-        // 更新本地缓存中的计数
-        int count = counterCache.asMap().compute(redisKey, (k, v) -> v == null ? 1 : v + 1);
+        long count = counterCache.asMap().compute(redisKey, (k, v) -> v == null ? 1 : v + 1);
 
         // 启动定时任务异步同步到 Redis
         scheduleSyncToRedis(redisKey, count);
@@ -177,34 +143,45 @@ public class CounterManager {
         // 返回本地缓存中的计数值
         return redissonClient.getAtomicLong(redisKey).get();
         }
-    private void scheduleSyncToRedis(String redisKey, int count) {
+    private void scheduleSyncToRedis(String redisKey, long count) {
         scheduler.scheduleAtFixedRate(() -> {
             try {
+                String luaScript =
+                        "if redis.call('exists', KEYS[1]) == 1 then " +
+                                "  redis.call('set', KEYS[1], ARGV[1]); " +  // Key 存在，只更新值
+                                "else " +
+                                "  redis.call('set', KEYS[1], ARGV[1], 'EX', ARGV[2]); " +  // Key 不存在，设置值和过期时间
+                                "end " +
+                                "return ARGV[1];";
 
-
-                   // 尝试设置值和过期时间（仅在 Key 不存在时生效）
-                   //boolean isSet = redissonClient.getBucket(redisKey).trySet(count, 60, TimeUnit.SECONDS);
-                   //if (!isSet) {
-                       // Key 已存在，只更新值
-                       //redissonClient.getBucket(redisKey).set(count);
-                   //}
-                   String luaScript =
-                       "if redis.call('exists', KEYS[1]) == 1 then " +
-                       "  redis.call('set', KEYS[1], ARGV[1]); " +  // Key 存在，只更新值
-                       "else " +
-                       "  redis.call('set', KEYS[1], ARGV[1], 'EX', ARGV[2]); " +  // Key 不存在，设置值和过期时间
-                       "end " +
-                       "return ARGV[1];";
-                   
-                   RScript script = redissonClient.getScript(IntegerCodec.INSTANCE);
-                   script.eval(
-                       RScript.Mode.READ_WRITE,
-                       luaScript,
-                       RScript.ReturnType.INTEGER,
-                       Collections.singletonList(redisKey),
-                       count,  // ARGV[1]: 替换的计数值
-                       60      // ARGV[2]: 过期时间（秒）
+                RScript script = redissonClient.getScript(IntegerCodec.INSTANCE);
+                script.eval(
+                        RScript.Mode.READ_WRITE,
+                        luaScript,
+                        RScript.ReturnType.INTEGER,
+                        Collections.singletonList(redisKey),
+                        count,  // ARGV[1]: 替换的计数值
+                        60      // ARGV[2]: 过期时间（秒）
                 );
+//                String luaScript =
+//                        "if redis.call('exists', KEYS[1]) == 1 then " +
+//                                "  redis.call('set', KEYS[1], ARGV[1]); " +
+//                                "  redis.call('expire', KEYS[1], ARGV[2]); " +
+//                                "  return ARGV[1]; " +
+//                                "else " +
+//                                "  redis.call('set', KEYS[1], ARGV[1]); " +
+//                                "  redis.call('expire', KEYS[1], ARGV[2]); " +
+//                                "  return ARGV[1]; " +
+//                                "end";
+//                RScript script = redissonClient.getScript(IntegerCodec.INSTANCE);
+//                script.eval(
+//                        RScript.Mode.READ_WRITE,
+//                        luaScript,
+//                        RScript.ReturnType.INTEGER,
+//                        Collections.singletonList(redisKey),
+//                        count, // ARGV[1]: 替换的计数值
+//                        60     // ARGV[2]: 过期时间（秒）
+//                );
             } catch (Exception ex) {
                 log.error("Failed to sync local cache to Redis for key: {}", redisKey, ex);
             }
